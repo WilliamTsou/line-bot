@@ -74,6 +74,7 @@ def get_nzd_twd_rate():
 
     # Yahoo 版面常改，一次試幾種 class
     possible_classes = [
+        "Fz(32px) Fw(b) Lh(1) Mend(4px) D(f) Ai(c) C($c-trend-down)",
         "Fz(32px) Fw(b) Lh(1) Mend(4px)",
         "Fz(32px) Fw(b) Lh(1)",
         "Fz(24px) Fw(b)",
@@ -244,3 +245,4 @@ def handle_postback(event):
 if __name__ == "__main__":
     # 本機測試用；在 Vercel 上會忽略這一段，直接使用 app 物件
     app.run(port=5000)
+
