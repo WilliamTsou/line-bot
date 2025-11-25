@@ -23,7 +23,9 @@ from linebot.v3.webhooks import (
 )
 
 import os
-from urllib.parse import urljoin  # 用來安全組合 URL
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 app = Flask(__name__)
 
@@ -53,19 +55,68 @@ def callback():
     return "OK"
 
 
+# ---------- 匯率爬蟲函式 ----------
+def get_nzd_twd_rate():
+    url = "https://tw.stock.yahoo.com/quote/NZDTWD=X"
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    try:
+        res = requests.get(url, headers=headers, timeout=5)
+    except Exception as e:
+        print("request error:", e)
+        return None
+
+    if res.status_code != 200:
+        print("status_code:", res.status_code)
+        return None
+
+    soup = BeautifulSoup(res.text, "html.parser")
+
+    # Yahoo 版面常改，一次試幾種 class
+    possible_classes = [
+        "Fz(32px) Fw(b) Lh(1) Mend(4px)",
+        "Fz(32px) Fw(b) Lh(1)",
+        "Fz(24px) Fw(b)",
+    ]
+
+    for cls in possible_classes:
+        tag = soup.find("span", class_=cls)
+        if tag and tag.text.strip():
+            return tag.text.strip()
+
+    return None
+
+
 @line_handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    text = event.message.text
+    text = event.message.text.strip()
 
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
 
-        # 收到 "quick_reply" 時送出快速回覆
-        if text == "quick_reply":
-            # 例如: https://line-bot-self.vercel.app/
-            base_url = request.url_root
+        # 1️⃣ 匯率功能
+        if text == "給我匯率":
+            rate = get_nzd_twd_rate()
+            if rate:
+                reply_text = (
+                    "目前紐西蘭幣（NZD）對台幣（TWD）的匯率是：\n"
+                    f"👉 {rate}"
+                )
+            else:
+                reply_text = "目前無法取得匯率 QQ（可能是 Yahoo 改版或暫時無法連線）"
 
-            # 正確產生 https 圖片網址
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=reply_text)],
+                )
+            )
+            return
+
+        # 2️⃣ quick_reply 功能
+        if text == "quick_reply":
+            base_url = request.url_root  # e.g. https://line-bot-self.vercel.app/
+
             postback_icon = urljoin(base_url, "static/postback.png")
             message_icon = urljoin(base_url, "static/message.png")
             datetime_icon = urljoin(base_url, "static/calendar.png")
@@ -139,14 +190,15 @@ def handle_message(event):
                     ],
                 )
             )
-        else:
-            # 其他訊息就先做 echo，方便確認 bot 有正常回覆
-            line_bot_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=text)],
-                )
+            return
+
+        # 3️⃣ 其他訊息：echo 回覆
+        line_bot_api.reply_message(
+            ReplyMessageRequest(
+                reply_token=event.reply_token,
+                messages=[TextMessage(text=text)],
             )
+        )
 
 
 @line_handler.add(PostbackEvent)
