@@ -21,7 +21,7 @@ from linebot.v3.webhooks import (
     TextMessageContent,
     PostbackEvent,
 )
-
+import random
 import os
 import requests
 from bs4 import BeautifulSoup
@@ -207,6 +207,20 @@ def handle_message(event):
         #         messages=[TextMessage(text=text)],
         #     )
         # )
+        
+                # 4 德德
+        if text == "德德喜歡誰":
+            people = ['威威','伯伯','小鄒','錢錢','小菜', 'toby', 'ㄈㄈ']
+            person = people[random.randint(0, len(people)-1)]
+            reply_text = f"德德喜歡{person}！"
+
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=reply_text)],
+                )
+            )
+            return
 
 
 @line_handler.add(PostbackEvent)
@@ -252,6 +266,5 @@ def handle_postback(event):
 if __name__ == "__main__":
     # 本機測試用；在 Vercel 上會忽略這一段，直接使用 app 物件
     app.run(port=5000)
-
 
 
