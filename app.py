@@ -72,18 +72,25 @@ def get_nzd_twd_rate():
 
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # Yahoo 版面常改，一次試幾種 class
-    possible_classes = [
-        "Fz(32px) Fw(b) Lh(1) Mend(4px) D(f) Ai(c) C($c-trend-down)",
-        "Fz(32px) Fw(b) Lh(1) Mend(4px)",
-        "Fz(32px) Fw(b) Lh(1)",
-        "Fz(24px) Fw(b)",
-    ]
+    # 先找「跌」的樣式（你本機測試的版本）
+    price_tag = soup.find(
+        "span",
+        attrs={
+            "class": "Fz(32px) Fw(b) Lh(1) Mend(4px) D(f) Ai(c) C($c-trend-down)"
+        },
+    )
 
-    for cls in possible_classes:
-        tag = soup.find("span", class_=cls)
-        if tag and tag.text.strip():
-            return tag.text.strip()
+    # 如果現在是漲，就會是 trend-up，再試一次
+    if not price_tag:
+        price_tag = soup.find(
+            "span",
+            attrs={
+                "class": "Fz(32px) Fw(b) Lh(1) Mend(4px) D(f) Ai(c) C($c-trend-up)"
+            },
+        )
+
+    if price_tag and price_tag.text.strip():
+        return price_tag.text.strip()
 
     return None
 
@@ -245,4 +252,5 @@ def handle_postback(event):
 if __name__ == "__main__":
     # 本機測試用；在 Vercel 上會忽略這一段，直接使用 app 物件
     app.run(port=5000)
+
 
