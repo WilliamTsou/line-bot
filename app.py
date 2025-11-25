@@ -200,13 +200,13 @@ def handle_message(event):
             )
             return
 
-        # 3️⃣ 其他訊息：echo 回覆
-        line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=text)],
-            )
-        )
+        # # 3️⃣ 其他訊息：echo 回覆
+        # line_bot_api.reply_message(
+        #     ReplyMessageRequest(
+        #         reply_token=event.reply_token,
+        #         messages=[TextMessage(text=text)],
+        #     )
+        # )
 
 
 @line_handler.add(PostbackEvent)
@@ -252,5 +252,6 @@ def handle_postback(event):
 if __name__ == "__main__":
     # 本機測試用；在 Vercel 上會忽略這一段，直接使用 app 物件
     app.run(port=5000)
+
 
 
