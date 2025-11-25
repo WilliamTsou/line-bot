@@ -1,10 +1,6 @@
 from flask import Flask, request, abort
-from linebot.v3 import (
-    WebhookHandler
-)
-from linebot.v3.exceptions import (
-    InvalidSignatureError
-)
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration,
     ApiClient,
@@ -18,89 +14,96 @@ from linebot.v3.messaging import (
     DatetimePickerAction,
     CameraAction,
     CameraRollAction,
-    LocationAction
+    LocationAction,
 )
 from linebot.v3.webhooks import (
     MessageEvent,
     TextMessageContent,
-    PostbackEvent
+    PostbackEvent,
 )
 
 import os
+from urllib.parse import urljoin  # 用來安全組合 URL
 
 app = Flask(__name__)
 
-configuration = Configuration(access_token=os.getenv('CHANNEL_ACCESS_TOKEN'))
-line_handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
+# 從環境變數讀取 Channel Access Token / Channel Secret
+configuration = Configuration(access_token=os.getenv("CHANNEL_ACCESS_TOKEN"))
+line_handler = WebhookHandler(os.getenv("CHANNEL_SECRET"))
 
 
-@app.route("/callback", methods=['POST'])
+@app.route("/callback", methods=["POST"])
 def callback():
-    # get X-Line-Signature header value
-    signature = request.headers['X-Line-Signature']
+    # 取得 X-Line-Signature header
+    signature = request.headers.get("X-Line-Signature", "")
 
-    # get request body as text
+    # 取得 request body
     body = request.get_data(as_text=True)
-    app.logger.info("Request body: " + body)
+    app.logger.info("Request body: %s", body)
 
-    # handle webhook body
+    # 驗證與處理 webhook
     try:
         line_handler.handle(body, signature)
     except InvalidSignatureError:
-        app.logger.info("Invalid signature. Please check your channel access token/channel secret.")
+        app.logger.warning(
+            "Invalid signature. Please check your channel access token/channel secret."
+        )
         abort(400)
 
-    return 'OK'
+    return "OK"
+
 
 @line_handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     text = event.message.text
+
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
-        if text == 'quick_reply':
-            postback_icon = request.url_root + 'static/postback.png'
-            postback_icon = postback_icon.replace("http", "https")
-            message_icon = request.url_root + 'static/message.png'
-            message_icon = message_icon.replace("http", "https")
-            datetime_icon = request.url_root + 'static/calendar.png'
-            datetime_icon = datetime_icon.replace("http", "https")
-            date_icon = request.url_root + 'static/calendar.png'
-            date_icon = date_icon.replace("http", "https")
-            time_icon = request.url_root + 'static/time.png'
-            time_icon = time_icon.replace("http", "https")
 
-            quickReply = QuickReply(
+        # 收到 "quick_reply" 時送出快速回覆
+        if text == "quick_reply":
+            # 例如: https://line-bot-self.vercel.app/
+            base_url = request.url_root
+
+            # 正確產生 https 圖片網址
+            postback_icon = urljoin(base_url, "static/postback.png")
+            message_icon = urljoin(base_url, "static/message.png")
+            datetime_icon = urljoin(base_url, "static/calendar.png")
+            date_icon = urljoin(base_url, "static/calendar.png")
+            time_icon = urljoin(base_url, "static/time.png")
+
+            quick_reply = QuickReply(
                 items=[
                     QuickReplyItem(
                         action=PostbackAction(
                             label="Postback",
                             data="postback",
-                            display_text="postback"
+                            display_text="postback",
                         ),
-                        image_url=postback_icon
+                        image_url=postback_icon,
                     ),
                     QuickReplyItem(
                         action=MessageAction(
                             label="Message",
-                            text="message"
+                            text="message",
                         ),
-                        image_url=message_icon
+                        image_url=message_icon,
                     ),
                     QuickReplyItem(
                         action=DatetimePickerAction(
                             label="Date",
                             data="date",
-                            mode="date"
+                            mode="date",
                         ),
-                        image_url=date_icon
+                        image_url=date_icon,
                     ),
                     QuickReplyItem(
                         action=DatetimePickerAction(
                             label="Time",
                             data="time",
-                            mode="time"
+                            mode="time",
                         ),
-                        image_url=time_icon
+                        image_url=time_icon,
                     ),
                     QuickReplyItem(
                         action=DatetimePickerAction(
@@ -109,68 +112,83 @@ def handle_message(event):
                             mode="datetime",
                             initial="2024-01-01T00:00",
                             max="2025-01-01T00:00",
-                            min="2023-01-01T00:00"
+                            min="2023-01-01T00:00",
                         ),
-                        image_url=datetime_icon
+                        image_url=datetime_icon,
                     ),
                     QuickReplyItem(
-                        action=CameraAction(label="Camera")
+                        action=CameraAction(label="Camera"),
                     ),
                     QuickReplyItem(
-                        action=CameraRollAction(label="Camera Roll")
+                        action=CameraRollAction(label="Camera Roll"),
                     ),
                     QuickReplyItem(
-                        action=LocationAction(label="Location")
-                    )
+                        action=LocationAction(label="Location"),
+                    ),
                 ]
             )
-            
+
             line_bot_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(
-                        text='請選擇項目',
-                        quick_reply=quickReply
-                    )]
+                    messages=[
+                        TextMessage(
+                            text="請選擇項目",
+                            quick_reply=quick_reply,
+                        )
+                    ],
                 )
             )
+        else:
+            # 其他訊息就先做 echo，方便確認 bot 有正常回覆
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=text)],
+                )
+            )
+
 
 @line_handler.add(PostbackEvent)
 def handle_postback(event):
+    postback_data = event.postback.data
+
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
-        postback_data = event.postback.data
-        if postback_data == 'postback':
+
+        if postback_data == "postback":
             line_bot_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text='Postback')]
+                    messages=[TextMessage(text="Postback")],
                 )
             )
-        elif postback_data == 'date':
-            date = event.postback.params['date']
+        elif postback_data == "date":
+            date = event.postback.params.get("date", "")
             line_bot_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text=date)]
+                    messages=[TextMessage(text=date)],
                 )
             )
-        elif postback_data == 'time':
-            time = event.postback.params['time']
+        elif postback_data == "time":
+            time = event.postback.params.get("time", "")
             line_bot_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text=time)]
+                    messages=[TextMessage(text=time)],
                 )
             )
-        elif postback_data == 'datetime':
-            datetime = event.postback.params['datetime']
+        elif postback_data == "datetime":
+            dt = event.postback.params.get("datetime", "")
             line_bot_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text=datetime)]
+                    messages=[TextMessage(text=dt)],
                 )
             )
 
+
 if __name__ == "__main__":
-    app.run()
+    # 本機測試用；在 Vercel 上會忽略這一段，直接使用 app 物件
+    app.run(port=5000)
