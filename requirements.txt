@@ -1,11 +1,4 @@
-<<<<<<< HEAD
 line-bot-sdk==3.7
 flask==3.0.0
 requests
 beautifulsoup4
-=======
-line-bot-sdk==3.7
-flask==3.0.0
-requests
-beautifulsoup4
->>>>>>> 96076f05903852380800eb1f2f6950a93299077c
