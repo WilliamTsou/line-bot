@@ -6,6 +6,7 @@ from linebot.v3.messaging import (
     ApiClient,
     MessagingApi,
     ReplyMessageRequest,
+    PushMessageRequest,
     TextMessage,
     QuickReply,
     QuickReplyItem,
@@ -16,6 +17,8 @@ from linebot.v3.messaging import (
     CameraRollAction,
     LocationAction,
 )
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from linebot.v3.webhooks import (
     MessageEvent,
     TextMessageContent,
@@ -32,6 +35,116 @@ app = Flask(__name__)
 # 從環境變數讀取 Channel Access Token / Channel Secret
 configuration = Configuration(access_token=os.getenv("CHANNEL_ACCESS_TOKEN"))
 line_handler = WebhookHandler(os.getenv("CHANNEL_SECRET"))
+
+# 訂閱者清單檔案（儲存 userId 的 JSON 陣列）
+SUBSCRIBERS_FILE = os.path.join(os.path.dirname(__file__), "subscribers.json")
+
+
+def load_subscribers():
+    try:
+        import json
+
+        if not os.path.exists(SUBSCRIBERS_FILE):
+            return []
+        with open(SUBSCRIBERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_subscribers(subs):
+    import json
+
+    try:
+        with open(SUBSCRIBERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(subs, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        app.logger.warning("Failed to save subscribers: %s", e)
+
+
+# 支援的幣別對映：key = 使用者輸入的國家/幣別名稱（中文或英文），value = Yahoo 金融的符號
+RATE_SYMBOLS = {
+    "紐西蘭": "NZDTWD=X",
+    "NZD": "NZDTWD=X",
+    "美金": "USDTWD=X",
+    "USD": "USDTWD=X",
+    "歐元": "EURTWD=X",
+    "EUR": "EURTWD=X",
+    "日圓": "JPYTWD=X",
+    "JPY": "JPYTWD=X",
+    "人民幣": "CNHTWD=X",
+    "CNY": "CNHTWD=X",
+}
+
+
+def get_rate(symbol):
+    """泛用的匯率抓取（symbol 例如 'NZDTWD=X'）若抓不到回傳 None。"""
+    url = f"https://tw.stock.yahoo.com/quote/{symbol}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        res = requests.get(url, headers=headers, timeout=6)
+    except Exception as e:
+        app.logger.warning("request error: %s", e)
+        return None
+    if res.status_code != 200:
+        app.logger.warning("status_code: %s for %s", res.status_code, symbol)
+        return None
+    soup = BeautifulSoup(res.text, "html.parser")
+    # same heuristic as before: try trend-down then trend-up
+    price_tag = soup.find(
+        "span",
+        attrs={
+            "class": "Fz(32px) Fw(b) Lh(1) Mend(4px) D(f) Ai(c) C($c-trend-down)"
+        },
+    )
+    if not price_tag:
+        price_tag = soup.find(
+            "span",
+            attrs={
+                "class": "Fz(32px) Fw(b) Lh(1) Mend(4px) D(f) Ai(c) C($c-trend-up)"
+            },
+        )
+    if price_tag and price_tag.text.strip():
+        return price_tag.text.strip()
+    return None
+
+
+def send_rate_to_subscribers():
+    """排程呼叫：抓取每個訂閱者的匯率並推播。"""
+    subs = load_subscribers()
+    if not subs:
+        app.logger.info("No subscribers to send rates to.")
+        return
+    # 準備一段簡短的匯率摘要，這裡示範幾個幣別
+    summary_lines = []
+    for name, sym in [("紐西蘭(NZD)", "NZDTWD=X"), ("美金(USD)", "USDTWD=X"), ("歐元(EUR)", "EURTWD=X")]:
+        rate = get_rate(sym)
+        if rate:
+            summary_lines.append(f"{name}：{rate}")
+        else:
+            summary_lines.append(f"{name}：無法取得")
+    message_text = "每日匯率提醒（08:00）：\n" + "\n".join(summary_lines)
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
+        for user_id in subs:
+            try:
+                line_bot_api.push_message(
+                    PushMessageRequest(to=user_id, messages=[TextMessage(text=message_text)])
+                )
+            except Exception as e:
+                app.logger.warning("Failed to push to %s: %s", user_id, e)
+
+
+# 啟動背景排程（只在當前進程中啟動一次）
+scheduler = None
+try:
+    scheduler = BackgroundScheduler()
+    # 每天 08:00（伺服器時區）觸發
+    scheduler.add_job(send_rate_to_subscribers, CronTrigger(hour=8, minute=0))
+    scheduler.start()
+    app.logger.info("Scheduler started")
+except Exception as e:
+    app.logger.warning("Scheduler not started: %s", e)
 
 
 @app.route("/callback", methods=["POST"])
@@ -198,6 +311,96 @@ def handle_message(event):
                     ],
                 )
             )
+            return
+
+        # 列出支援的匯率（簡單清單）
+        if text == "匯率清單":
+            supported = ["紐西蘭", "美金", "歐元", "日圓", "人民幣"]
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text="我們支援的匯率：\n" + "\n".join(supported))],
+                )
+            )
+            return
+
+        # 使用者輸入幣別名稱時回傳該幣別匯率（支援中文或英文縮寫）
+        if text in RATE_SYMBOLS:
+            sym = RATE_SYMBOLS[text]
+            rate = get_rate(sym)
+            if rate:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=f"{text} 匯率：{rate}")],
+                    )
+                )
+            else:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text="無法取得匯率，請稍後再試。")],
+                    )
+                )
+            return
+
+        # 訂閱 / 取消訂閱 每日匯率推播
+        if text in ("訂閱匯率", "訂閱"):
+            user_id = getattr(event.source, "userId", None) or getattr(event.source, "user_id", None)
+            if not user_id:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text="無法取得你的 user id，無法完成訂閱。")],
+                    )
+                )
+                return
+            subs = load_subscribers()
+            if user_id in subs:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text="你已經訂閱過每日匯率通知。")],
+                    )
+                )
+                return
+            subs.append(user_id)
+            save_subscribers(subs)
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text="已訂閱每日匯率（每天 08:00）。")],
+                )
+            )
+            return
+
+        if text in ("取消訂閱", "取消訂閱匯率"):
+            user_id = getattr(event.source, "userId", None) or getattr(event.source, "user_id", None)
+            if not user_id:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text="無法取得你的 user id，無法完成取消訂閱。")],
+                    )
+                )
+                return
+            subs = load_subscribers()
+            if user_id in subs:
+                subs.remove(user_id)
+                save_subscribers(subs)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text="已取消訂閱每日匯率。")],
+                    )
+                )
+            else:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text="你尚未訂閱每日匯率。")],
+                    )
+                )
             return
 
         # 3️⃣ 德德喜歡誰
