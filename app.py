@@ -403,28 +403,7 @@ def handle_message(event):
                 )
             return
 
-        # 3️⃣ 德德喜歡誰
-        if text == "德德喜歡誰":
-            people = [
-                '威威', '伯伯', '小鄒', '錢錢', '小菜', 'toby', 'ㄈㄈ'
-            ]
-            person = random.choice(people)
-            reply_text = f"德德喜歡{person}！"
-            line_bot_api.reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=reply_text)],
-                )
-            )
-            return
-
-        # # 其他訊息：echo 回覆
-        line_bot_api.reply_message(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=text)],
-            )
-        )
+    
                 
 
 
